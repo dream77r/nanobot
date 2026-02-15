@@ -151,14 +151,20 @@ class LiteLLMProvider(LLMProvider):
         last_error = ""
         for i, candidate in enumerate(models_to_try):
             kwargs = self._build_kwargs(candidate, messages, tools, max_tokens, temperature)
+            label = "Primary" if i == 0 else f"Fallback[{i}]"
             try:
                 response = await acompletion(**kwargs)
+                result = self._parse_response(response)
+                # Treat empty content (no text AND no tool calls) as a failure
+                if not result.content and not result.tool_calls:
+                    logger.warning(f"{label} model {candidate} returned empty response")
+                    last_error = "empty response"
+                    continue
                 if i > 0:
                     logger.info(f"Fallback success: {candidate} (primary {primary} failed)")
-                return self._parse_response(response)
+                return result
             except Exception as e:
                 last_error = str(e)
-                label = "Primary" if i == 0 else f"Fallback[{i}]"
                 logger.warning(f"{label} model {candidate} failed: {last_error}")
 
         return LLMResponse(
