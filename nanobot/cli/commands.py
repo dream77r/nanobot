@@ -293,6 +293,7 @@ def _make_provider(config):
         default_model=model,
         extra_headers=p.extra_headers if p else None,
         provider_name=config.get_provider_name(),
+        fallback_models=config.agents.defaults.fallback_models or [],
     )
 
 
@@ -346,6 +347,8 @@ def gateway(
         cron_service=cron,
         restrict_to_workspace=config.tools.restrict_to_workspace,
         session_manager=session_manager,
+        paid_model=config.agents.defaults.paid_model,
+        fallback_models=config.agents.defaults.fallback_models,
     )
     
     # Set cron callback (needs agent)
@@ -386,23 +389,41 @@ def gateway(
         console.print(f"[green]✓[/green] Channels enabled: {', '.join(channels.enabled_channels)}")
     else:
         console.print("[yellow]Warning: No channels enabled[/yellow]")
-    
+
     cron_status = cron.status()
     if cron_status["jobs"] > 0:
         console.print(f"[green]✓[/green] Cron: {cron_status['jobs']} scheduled jobs")
-    
+
     console.print(f"[green]✓[/green] Heartbeat: every 30m")
-    
+
+    # Admin panel
+    admin_server = None
+    if config.admin.enabled:
+        from nanobot.admin.server import AdminServer
+        admin_server = AdminServer(
+            port=config.admin.port,
+            password=config.admin.password,
+            agent_loop=agent,
+            session_manager=session_manager,
+            cron_service=cron,
+            channels=channels.enabled_channels,
+        )
+        console.print(f"[green]✓[/green] Admin panel: http://0.0.0.0:{config.admin.port}")
+
     async def run():
         try:
             await cron.start()
             await heartbeat.start()
+            if admin_server:
+                await admin_server.start()
             await asyncio.gather(
                 agent.run(),
                 channels.start_all(),
             )
         except KeyboardInterrupt:
             console.print("\nShutting down...")
+            if admin_server:
+                await admin_server.stop()
             heartbeat.stop()
             cron.stop()
             agent.stop()

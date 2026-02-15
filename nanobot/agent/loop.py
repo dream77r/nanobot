@@ -50,13 +50,18 @@ class AgentLoop:
         cron_service: "CronService | None" = None,
         restrict_to_workspace: bool = False,
         session_manager: SessionManager | None = None,
+        paid_model: str = "",
+        fallback_models: list[str] | None = None,
     ):
         from nanobot.config.schema import ExecToolConfig
         from nanobot.cron.service import CronService
         self.bus = bus
         self.provider = provider
         self.workspace = workspace
-        self.model = model or provider.get_default_model()
+        self._free_model = model or provider.get_default_model()
+        self._paid_model = paid_model
+        self._fallback_models = fallback_models or []
+        self.model = self._free_model  # active model
         self.max_iterations = max_iterations
         self.temperature = temperature
         self.max_tokens = max_tokens
@@ -129,6 +134,44 @@ class AgentLoop:
         if cron_tool := self.tools.get("cron"):
             if isinstance(cron_tool, CronTool):
                 cron_tool.set_context(channel, chat_id)
+
+    def _handle_model_command(self, cmd: str, channel: str, chat_id: str) -> OutboundMessage:
+        """Handle /model command for runtime model switching."""
+        parts = cmd.split(maxsplit=1)
+        arg = parts[1].strip() if len(parts) > 1 else ""
+
+        if not arg:
+            mode = "paid" if self.model == self._paid_model else "free"
+            return OutboundMessage(channel=channel, chat_id=chat_id,
+                                  content=f"Current model: `{self.model}` ({mode})")
+
+        if arg == "free":
+            self.model = self._free_model
+            return OutboundMessage(channel=channel, chat_id=chat_id,
+                                  content=f"Switched to free: `{self.model}`")
+
+        if arg == "paid":
+            if not self._paid_model:
+                return OutboundMessage(channel=channel, chat_id=chat_id,
+                                      content="No paid model configured (set `paidModel` in config.json)")
+            self.model = self._paid_model
+            return OutboundMessage(channel=channel, chat_id=chat_id,
+                                  content=f"Switched to paid: `{self.model}`")
+
+        if arg == "list":
+            lines = [f"• `{self._free_model}` (free, primary)"]
+            for m in self._fallback_models:
+                lines.append(f"• `{m}` (free, fallback)")
+            if self._paid_model:
+                lines.append(f"• `{self._paid_model}` (paid)")
+            lines.append(f"\nActive: `{self.model}`")
+            return OutboundMessage(channel=channel, chat_id=chat_id,
+                                  content="\n".join(lines))
+
+        # Direct model name
+        self.model = arg
+        return OutboundMessage(channel=channel, chat_id=chat_id,
+                              content=f"Switched to: `{self.model}`")
 
     async def _run_agent_loop(self, initial_messages: list[dict]) -> tuple[str | None, list[str]]:
         """
@@ -258,7 +301,9 @@ class AgentLoop:
                                   content="New session started. Memory consolidation in progress.")
         if cmd == "/help":
             return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id,
-                                  content="🐈 nanobot commands:\n/new — Start a new conversation\n/help — Show available commands")
+                                  content="🐈 nanobot commands:\n/new — Start a new conversation\n/model — Show or switch model\n/help — Show available commands")
+        if cmd.startswith("/model"):
+            return self._handle_model_command(cmd, msg.channel, msg.chat_id)
         
         if len(session.messages) > self.memory_window:
             asyncio.create_task(self._consolidate_memory(session))

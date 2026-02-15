@@ -159,6 +159,8 @@ class AgentDefaults(BaseModel):
     """Default agent configuration."""
     workspace: str = "~/.nanobot/workspace"
     model: str = "anthropic/claude-opus-4-5"
+    fallback_models: list[str] = Field(default_factory=list)
+    paid_model: str = ""
     max_tokens: int = 8192
     temperature: float = 0.7
     max_tool_iterations: int = 20
@@ -223,6 +225,13 @@ class ToolsConfig(BaseModel):
     restrict_to_workspace: bool = False  # If true, restrict all tool access to workspace directory
 
 
+class AdminConfig(BaseModel):
+    """Admin web panel configuration."""
+    enabled: bool = False
+    port: int = 18791
+    password: str = ""
+
+
 class Config(BaseSettings):
     """Root configuration for nanobot."""
     agents: AgentsConfig = Field(default_factory=AgentsConfig)
@@ -230,6 +239,7 @@ class Config(BaseSettings):
     providers: ProvidersConfig = Field(default_factory=ProvidersConfig)
     gateway: GatewayConfig = Field(default_factory=GatewayConfig)
     tools: ToolsConfig = Field(default_factory=ToolsConfig)
+    admin: AdminConfig = Field(default_factory=AdminConfig)
     
     @property
     def workspace_path(self) -> Path:
