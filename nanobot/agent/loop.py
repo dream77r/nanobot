@@ -439,14 +439,23 @@ Respond with ONLY valid JSON, no markdown fences."""
                 ],
                 model=self.model,
             )
-            text = (response.content or "").strip()
-            if text.startswith("```"):
-                text = text.split("\n", 1)[-1].rsplit("```", 1)[0].strip()
-            result = json.loads(text)
+            raw = response.content or ""
+            if isinstance(raw, dict):
+                result = raw
+            elif isinstance(raw, list):
+                # Some models return content as list of blocks
+                result = raw[0] if raw and isinstance(raw[0], dict) else json.loads(str(raw))
+            else:
+                text = str(raw).strip()
+                if text.startswith("```"):
+                    text = text.split("\n", 1)[-1].rsplit("```", 1)[0].strip()
+                result = json.loads(text)
 
             if entry := result.get("history_entry"):
-                memory.append_history(entry)
+                memory.append_history(entry if isinstance(entry, str) else json.dumps(entry, ensure_ascii=False))
             if update := result.get("memory_update"):
+                if isinstance(update, dict):
+                    update = json.dumps(update, ensure_ascii=False, indent=2)
                 if update != current_memory:
                     memory.write_long_term(update)
 
